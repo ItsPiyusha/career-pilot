@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Microsoft SDE Job Tracker</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2128;
+    --border: #30363d;
+    --accent: #00adef;   /* Microsoft blue */
+    --accent2: #50fa7b;
+    --warn: #f39c12;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --tag: #21262d;
+    --new-badge: #1a3a1a;
+    --new-text: #56d364;
+    --applied-badge: #1a2a4a;
+    --applied-text: #58a6ff;
+    --skip-badge: #2a1a1a;
+    --skip-text: #f85149;
+    --radius: 8px;
+    --font-mono: 'Cascadia Code', 'Fira Code', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ── TOP BAR ── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 16px;
+    letter-spacing: -0.3px;
+  }
+  .logo svg { color: var(--accent); }
+  header .spacer { flex: 1; }
+  .stat-pill {
+    background: var(--tag);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .stat-pill span { color: var(--text); font-weight: 600; }
+
+  /* ── MAIN LAYOUT ── */
+  main {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 20px;
+  }
+
+  /* ── DROP ZONE ── */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    background: var(--surface);
+    margin-bottom: 24px;
+  }
+  .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(0,173,239,0.05);
+  }
+  .drop-zone h3 { font-size: 18px; margin-bottom: 8px; }
+  .drop-zone p { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+  .drop-zone input { display: none; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--tag);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    transition: background 0.15s;
+  }
+  .btn:hover { background: var(--surface2); }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+    font-weight: 600;
+  }
+  .btn.primary:hover { background: #1bbcff; }
+
+  /* ── CONTROLS ── */
+  .controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    align-items: center;
+  }
+  .search-input {
+    flex: 1;
+    min-width: 180px;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+  }
+  .search-input:focus { border-color: var(--accent); }
+  select.filter-select {
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+  }
+
+  /* ── JOB CARDS ── */
+  .job-list { display: flex; flex-direction: column; gap: 1px; }
+
+  .job-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 16px;
+    align-items: start;
+    transition: border-color 0.15s;
+    margin-bottom: 6px;
+  }
+  .job-card:hover { border-color: #444c56; }
+  .job-card.status-applied { border-left: 3px solid var(--applied-text); }
+  .job-card.status-skip    { border-left: 3px solid var(--skip-text); opacity: 0.55; }
+  .job-card.status-new     { border-left: 3px solid var(--new-text); }
+
+  .job-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .job-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+  }
+  .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .badge-new      { background: var(--new-badge);     color: var(--new-text); }
+  .badge-applied  { background: var(--applied-badge); color: var(--applied-text); }
+  .badge-skip     { background: var(--skip-badge);    color: var(--skip-text); }
+
+  .job-actions {
+    display: flex;
+    gap: 6px;
+    align-items: flex-start;
+    flex-shrink: 0;
+  }
+  .action-btn {
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--tag);
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .action-btn:hover { color: var(--text); background: var(--surface2); }
+  .action-btn.apply  { border-color: var(--applied-text); color: var(--applied-text); }
+  .action-btn.apply:hover { background: var(--applied-badge); }
+  .action-btn.skip   { border-color: var(--skip-text); color: var(--skip-text); }
+  .action-btn.skip:hover { background: var(--skip-badge); }
+  .action-btn.open   { border-color: var(--accent); color: var(--accent); }
+  .action-btn.open:hover { background: rgba(0,173,239,0.1); }
+
+  /* ── EMPTY / LOADING ── */
+  .empty {
+    text-align: center;
+    padding: 48px;
+    color: var(--muted);
+  }
+  .empty h3 { color: var(--text); margin-bottom: 8px; }
+
+  /* ── FOOTER EXPORT ── */
+  .footer-bar {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    align-items: center;
+  }
+  .footer-bar .note { color: var(--muted); font-size: 12px; flex: 1; }
+
+  /* ── TABS ── */
+  .tabs {
+    display: flex;
+    gap: 2px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .tab {
+    padding: 8px 16px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 13px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all 0.15s;
+  }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .tab:hover:not(.active) { color: var(--text); }
+
+  .count-badge {
+    display: inline-block;
+    background: var(--tag);
+    border-radius: 10px;
+    padding: 1px 7px;
+    font-size: 11px;
+    margin-left: 6px;
+    color: var(--muted);
+  }
+
+  /* ── SAMPLE DATA NOTICE ── */
+  .notice {
+    background: rgba(0,173,239,0.08);
+    border: 1px solid rgba(0,173,239,0.25);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .notice strong { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg width="20" height="20" viewBox="0 0 21 21" fill="currentColor">
+      <rect x="1" y="1" width="9" height="9"/><rect x="11" y="1" width="9" height="9"/>
+      <rect x="1" y="11" width="9" height="9"/><rect x="11" y="11" width="9" height="9"/>
+    </svg>
+    Microsoft SDE Tracker
+  </div>
+  <div class="spacer"></div>
+  <div class="stat-pill">Total <span id="stat-total">0</span></div>
+  <div class="stat-pill">New <span id="stat-new">0</span></div>
+  <div class="stat-pill">Applied <span id="stat-applied">0</span></div>
+</header>
+
+<main>
+  <!-- Drop zone -->
+  <div class="drop-zone" id="dropZone">
+    <h3>📂 Drop your CSV here</h3>
+    <p>Drag and drop <code>microsoft_jobs.csv</code> or <code>new_jobs.csv</code> output from the scraper</p>
+    <label class="btn primary">
+      ↑ Browse File
+      <input type="file" id="fileInput" accept=".csv" />
+    </label>
+    &nbsp;
+    <button class="btn" onclick="loadSampleData()">Load Sample Data</button>
+  </div>
+
+  <!-- Notice (hidden until loaded) -->
+  <div class="notice" id="notice" style="display:none">
+    <span>💡</span>
+    <span>Showing <strong id="noticeCount">0</strong> jobs — statuses are saved in your browser.
+    Run <code>python scraper.py</code> daily to refresh, then re-drop the CSV.</span>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs" id="tabs" style="display:none">
+    <div class="tab active" data-tab="all" onclick="setTab(this)">
+      All <span class="count-badge" id="tab-all-count">0</span>
+    </div>
+    <div class="tab" data-tab="new" onclick="setTab(this)">
+      New <span class="count-badge" id="tab-new-count">0</span>
+    </div>
+    <div class="tab" data-tab="applied" onclick="setTab(this)">
+      Applied <span class="count-badge" id="tab-applied-count">0</span>
+    </div>
+    <div class="tab" data-tab="skip" onclick="setTab(this)">
+      Skipped <span class="count-badge" id="tab-skip-count">0</span>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls" id="controls" style="display:none">
+    <input class="search-input" id="searchInput" placeholder="🔍  Filter by title or location..." oninput="renderJobs()" />
+    <select class="filter-select" id="locationFilter" onchange="renderJobs()">
+      <option value="">All Locations</option>
+    </select>
+    <button class="btn" onclick="exportCSV()">⬇ Export CSV</button>
+  </div>
+
+  <!-- Job list -->
+  <div class="job-list" id="jobList"></div>
+
+  <div class="footer-bar" id="footerBar" style="display:none">
+    <div class="note">Statuses auto-saved in browser storage. Re-drop CSV to refresh job list without losing statuses.</div>
+    <button class="btn" onclick="clearStatuses()">Reset All Statuses</button>
+  </div>
+</main>
+
+<script>
+// ── STATE ────────────────────────────────────────────────────────────
+let allJobs    = [];   // parsed from CSV
+let statuses   = {};   // { jobId: "new" | "applied" | "skip" }
+let activeTab  = "all";
+const STORAGE_KEY = "ms_job_statuses_v1";
+
+// ── LOAD / PARSE ─────────────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
+  return lines.slice(1).map(line => {
+    // Naive CSV split — handles quoted commas crudely
+    const cols = [];
+    let cur = "", inQ = false;
+    for (const ch of line) {
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === "," && !inQ) { cols.push(cur); cur = ""; }
+      else { cur += ch; }
+    }
+    cols.push(cur);
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = (cols[i] || "").replace(/^"|"$/g, "").trim(); });
+    return obj;
+  }).filter(j => j.jobId);
+}
+
+function loadStatuses() {
+  try { statuses = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); }
+  catch { statuses = {}; }
+}
+
+function saveStatuses() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+}
+
+function mergeStatuses(jobs) {
+  jobs.forEach(j => {
+    if (!statuses[j.jobId]) statuses[j.jobId] = "new";
+  });
+  saveStatuses();
+}
+
+function onFileLoaded(text) {
+  const parsed = parseCSV(text);
+  if (!parsed.length) { alert("No jobs found in CSV. Make sure you're loading scraper output."); return; }
+  allJobs = parsed;
+  loadStatuses();
+  mergeStatuses(allJobs);
+  document.getElementById("dropZone").style.display = "none";
+  document.getElementById("notice").style.display = "flex";
+  document.getElementById("tabs").style.display = "flex";
+  document.getElementById("controls").style.display = "flex";
+  document.getElementById("footerBar").style.display = "flex";
+  populateLocationFilter();
+  renderAll();
+}
+
+// ── SAMPLE DATA ──────────────────────────────────────────────────────
+function loadSampleData() {
+  const sample = [
+    { jobId: "1780001", title: "Software Engineer II", location: "Redmond, Washington, United States", postingDate: "2026-08-06", url: "https://jobs.careers.microsoft.com/global/en/job/1780001/" },
+    { jobId: "1780002", title: "Senior Software Engineer - Azure Core", location: "Bengaluru, Karnataka, India", postingDate: "2026-08-07", url: "https://jobs.careers.microsoft.com/global/en/job/1780002/" },
+    { jobId: "1780003", title: "Principal Software Engineer - AI Platform", location: "Remote, United States", postingDate: "2026-08-07", url: "https://jobs.careers.microsoft.com/global/en/job/1780003/" },
+    { jobId: "1780004", title: "Software Engineer - Microsoft Teams", location: "Prague, Czech Republic", postingDate: "2026-08-05", url: "https://jobs.careers.microsoft.com/global/en/job/1780004/" },
+    { jobId: "1780005", title: "Software Engineer - Security", location: "Dublin, Ireland", postingDate: "2026-08-04", url: "https://jobs.careers.microsoft.com/global/en/job/1780005/" },
+    { jobId: "1780006", title: "Senior SDE - GitHub Copilot", location: "Remote, United States", postingDate: "2026-08-08", url: "https://jobs.careers.microsoft.com/global/en/job/1780006/" },
+    { jobId: "1780007", title: "Software Dev Engineer - Bing Search", location: "Hyderabad, Telangana, India", postingDate: "2026-08-03", url: "https://jobs.careers.microsoft.com/global/en/job/1780007/" },
+    { jobId: "1780008", title: "SDE II - Xbox Game Studios", location: "Redmond, Washington, United States", postingDate: "2026-08-06", url: "https://jobs.careers.microsoft.com/global/en/job/1780008/" },
+  ];
+  const csv = "jobId,title,location,postingDate,url,scraped_at\n" +
+    sample.map(j => `${j.jobId},"${j.title}","${j.location}",${j.postingDate},${j.url},2026-08-08 08:00`).join("\n");
+  onFileLoaded(csv);
+}
+
+// ── FILE HANDLING ─────────────────────────────────────────────────────
+document.getElementById("fileInput").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => onFileLoaded(ev.target.result);
+  reader.readAsText(file);
+});
+
+const dz = document.getElementById("dropZone");
+dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
+dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+dz.addEventListener("drop", e => {
+  e.preventDefault(); dz.classList.remove("drag-over");
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => onFileLoaded(ev.target.result);
+  reader.readAsText(file);
+});
+
+// ── FILTER + RENDER ───────────────────────────────────────────────────
+function setTab(el) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  el.classList.add("active");
+  activeTab = el.dataset.tab;
+  renderJobs();
+}
+
+function populateLocationFilter() {
+  const sel = document.getElementById("locationFilter");
+  const locs = [...new Set(allJobs.map(j => {
+    const parts = (j.location || "").split(",");
+    return parts[parts.length - 1].trim();  // last part = country/state
+  }))].filter(Boolean).sort();
+  locs.forEach(loc => {
+    const opt = document.createElement("option");
+    opt.value = loc; opt.textContent = loc;
+    sel.appendChild(opt);
+  });
+}
+
+function filteredJobs() {
+  const q    = document.getElementById("searchInput").value.toLowerCase();
+  const locF = document.getElementById("locationFilter").value;
+
+  return allJobs.filter(j => {
+    const st = statuses[j.jobId] || "new";
+    if (activeTab !== "all" && st !== activeTab) return false;
+    if (locF) {
+      const lastPart = (j.location || "").split(",").pop().trim();
+      if (lastPart !== locF) return false;
+    }
+    if (q) {
+      const haystack = `${j.title} ${j.location}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+function renderAll() {
+  updateStats();
+  renderJobs();
+}
+
+function updateStats() {
+  const counts = { new: 0, applied: 0, skip: 0 };
+  allJobs.forEach(j => {
+    const st = statuses[j.jobId] || "new";
+    counts[st] = (counts[st] || 0) + 1;
+  });
+  document.getElementById("stat-total").textContent   = allJobs.length;
+  document.getElementById("stat-new").textContent     = counts.new;
+  document.getElementById("stat-applied").textContent = counts.applied;
+  document.getElementById("noticeCount").textContent  = allJobs.length;
+  document.getElementById("tab-all-count").textContent     = allJobs.length;
+  document.getElementById("tab-new-count").textContent     = counts.new;
+  document.getElementById("tab-applied-count").textContent = counts.applied;
+  document.getElementById("tab-skip-count").textContent    = counts.skip || 0;
+}
+
+function setStatus(jobId, status) {
+  statuses[jobId] = status;
+  saveStatuses();
+  renderAll();
+}
+
+function renderJobs() {
+  const jobs = filteredJobs();
+  const list = document.getElementById("jobList");
+
+  if (!jobs.length) {
+    list.innerHTML = `<div class="empty"><h3>No jobs here</h3><p>Try a different filter or tab.</p></div>`;
+    return;
+  }
+
+  list.innerHTML = jobs.map(j => {
+    const st = statuses[j.jobId] || "new";
+    const badges = { new: "badge-new", applied: "badge-applied", skip: "badge-skip" };
+    const labels = { new: "New", applied: "Applied", skip: "Skipped" };
+    return `
+    <div class="job-card status-${st}" id="card-${j.jobId}">
+      <div>
+        <div class="job-title">${escHtml(j.title)}</div>
+        <div class="job-meta">
+          <span class="badge ${badges[st]}">${labels[st]}</span>
+          <span class="meta-item">📍 ${escHtml(j.location || "—")}</span>
+          <span class="meta-item">📅 ${j.postingDate || "—"}</span>
+        </div>
+      </div>
+      <div class="job-actions">
+        <a href="${escHtml(j.url)}" target="_blank" rel="noopener">
+          <button class="action-btn open">↗ Open</button>
+        </a>
+        ${st !== "applied" ? `<button class="action-btn apply" onclick="setStatus('${j.jobId}','applied')">✓ Applied</button>` : ""}
+        ${st !== "skip"    ? `<button class="action-btn skip"  onclick="setStatus('${j.jobId}','skip')">✗ Skip</button>` : ""}
+        ${st !== "new"     ? `<button class="action-btn"       onclick="setStatus('${j.jobId}','new')">↺ Reset</button>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── EXPORT ────────────────────────────────────────────────────────────
+function exportCSV() {
+  const rows = allJobs.map(j => ({
+    ...j,
+    status: statuses[j.jobId] || "new"
+  }));
+  const fields = ["jobId","title","location","postingDate","status","url"];
+  const lines  = [fields.join(","), ...rows.map(r => fields.map(f => `"${(r[f]||"").replace(/"/g,'""')}"`).join(","))];
+  const blob   = new Blob([lines.join("\n")], { type: "text/csv" });
+  const a      = document.createElement("a");
+  a.href       = URL.createObjectURL(blob);
+  a.download   = `ms_jobs_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+function clearStatuses() {
+  if (!confirm("Reset all statuses to 'New'? This cannot be undone.")) return;
+  statuses = {};
+  mergeStatuses(allJobs);
+  renderAll();
+}
+
+// Init
+loadStatuses();
+</script>
+</body>
+</html>
