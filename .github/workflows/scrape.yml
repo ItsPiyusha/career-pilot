@@ -1,87 +1,65 @@
-name: Microsoft Jobs Scraper
 
+Scrape · YML
+name: Microsoft Jobs Scraper
+ 
 on:
-  # Run automatically every day at 8 AM UTC
   schedule:
     - cron: "0 8 * * *"
-
-  # Also allow manual trigger from GitHub UI
   workflow_dispatch:
-    inputs:
-      keywords:
-        description: "Search keywords (comma-separated)"
-        required: false
-        default: "software engineer,SDE"
-
+ 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
-
+ 
     steps:
-      # 1. Checkout your repo
       - name: Checkout
         uses: actions/checkout@v4
-
-      # 2. Set up Python
+ 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-
-      # 3. Install dependencies
+          cache-dependency-path: requirements.txt
+ 
       - name: Install dependencies
-        run: pip install requests
-
-      # 4. Run the scraper
+        run: pip install -r requirements.txt
+ 
       - name: Run scraper
         run: python scraper.py
         env:
           PYTHONUNBUFFERED: "1"
-
-      # 5. Check for new jobs
+ 
       - name: Check for new jobs
         id: check
         run: |
           if [ -f new_jobs.csv ]; then
             COUNT=$(tail -n +2 new_jobs.csv | wc -l | tr -d ' ')
-            echo "new_count=$COUNT" >> "$GITHUB_OUTPUT"
-            echo "Found $COUNT new jobs"
+            echo "new_count=$COUNT" >> $GITHUB_OUTPUT
           else
-            echo "new_count=0" >> "$GITHUB_OUTPUT"
+            echo "new_count=0" >> $GITHUB_OUTPUT
           fi
-
-      # 6. Commit updated CSVs back to repo
+ 
       - name: Commit results
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git add microsoft_jobs.csv new_jobs.csv seen_ids.json
-
           git diff --staged --quiet || git commit -m \
-            "Scrape $(date +'%Y-%m-%d'): ${{ steps.check.outputs.new_count }} new SDE jobs"
-
+            "🤖 Scrape $(date +'%Y-%m-%d'): ${{ steps.check.outputs.new_count }} new SDE jobs"
           git push
-
-      # 7. Print summary in Actions UI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+ 
       - name: Summary
         run: |
-          echo "## 📊 Scrape Results" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Metric | Count |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
-
-          if [ -f microsoft_jobs.csv ]; then
-            TOTAL=$(tail -n +2 microsoft_jobs.csv | wc -l | tr -d ' ')
-          else
-            TOTAL=0
-          fi
-
-          NEW=${{ steps.check.outputs.new_count }}
-
-          echo "| Total jobs found | $TOTAL |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| New since last run | $NEW |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Run time | $(date +'%Y-%m-%d %H:%M UTC') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 📊 Scrape Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          TOTAL=$(tail -n +2 microsoft_jobs.csv | wc -l | tr -d ' ')
+          echo "| Total jobs found | $TOTAL |" >> $GITHUB_STEP_SUMMARY
+          echo "| New since last run | ${{ steps.check.outputs.new_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run time | $(date +'%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
+ 
