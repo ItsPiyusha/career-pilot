@@ -1,89 +1,58 @@
 """
 Microsoft Careers Scraper — SDE roles, all locations
-Uses Microsoft's Eightfold SmartApply public API directly.
+Strategy: Use LinkedIn + Indeed via JobSpy, filtered to Microsoft only.
+This works from GitHub Actions since it queries job aggregators, not MS directly.
 Outputs: microsoft_jobs.csv (all), new_jobs.csv (only new since last run)
 """
 
 import csv
 import json
 import os
-import time
 from datetime import datetime, timezone
 
-import requests
+from jobspy import scrape_jobs
 
 # ── CONFIG ───────────────────────────────────────────────────
-KEYWORDS      = ["software engineer", "SDE", "software development engineer"]
-PAGE_SIZE     = 25
-DELAY         = 1.5
+SEARCH_TERM   = "software engineer Microsoft"
+RESULTS       = 100
+HOURS_OLD     = 72       # only jobs posted in last 3 days
 OUTPUT_DIR    = os.path.dirname(os.path.abspath(__file__))
 SEEN_IDS_FILE = os.path.join(OUTPUT_DIR, "seen_ids.json")
 ALL_JOBS_CSV  = os.path.join(OUTPUT_DIR, "microsoft_jobs.csv")
 NEW_JOBS_CSV  = os.path.join(OUTPUT_DIR, "new_jobs.csv")
 
-BASE_URL = "https://microsoft.eightfold.ai/api/apply/v2/jobs"
-HEADERS  = {
-    "Accept":          "application/json",
-    "Content-Type":    "application/json",
-    "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Referer":         "https://jobs.careers.microsoft.com/",
-}
 
+def fetch_jobs() -> list:
+    print("🔍  Searching LinkedIn + Indeed for Microsoft SDE roles...")
+    jobs = scrape_jobs(
+        site_name=["linkedin", "indeed"],
+        search_term=SEARCH_TERM,
+        results_wanted=RESULTS,
+        hours_old=HOURS_OLD,
+        country_indeed="worldwide",
+        linkedin_fetch_description=False,
+        verbose=1,
+    )
+    print(f"  Raw results: {len(jobs)}")
 
-def fetch_page(keyword: str, start: int) -> dict:
-    params = {
-        "domain":   "microsoft.com",
-        "hl":       "en",
-        "start":    start,
-        "num":      PAGE_SIZE,
-        "q":        keyword,
-        "pid":      "",
-        "triggerGoButton": "false",
-    }
-    resp = requests.get(BASE_URL, headers=HEADERS, params=params, timeout=20)
-    print(f"  [{resp.status_code}] start={start} | {resp.url[:100]}")
-    resp.raise_for_status()
-    return resp.json()
-
-
-def scrape_keyword(keyword: str) -> list:
-    all_jobs = []
-    start = 0
-    print(f"\n🔍  '{keyword}'")
-
-    while True:
-        try:
-            data = fetch_page(keyword, start)
-        except requests.RequestException as e:
-            print(f"  Request failed: {e}")
-            break
-
-        positions = data.get("positions", [])
-        total     = data.get("count", 0)
-
-        if not positions:
-            print(f"  No results at start={start} (total={total})")
-            break
-
-        all_jobs.extend(positions)
-        print(f"  Got {len(positions)} jobs (total={total}, fetched={len(all_jobs)})")
-
-        if len(all_jobs) >= total:
-            break
-        start += PAGE_SIZE
-        time.sleep(DELAY)
-
-    return all_jobs
+    # Filter to Microsoft only
+    ms_jobs = jobs[
+        jobs["company"].str.lower().str.contains("microsoft", na=False)
+    ]
+    print(f"  Microsoft only: {len(ms_jobs)}")
+    return ms_jobs.to_dict("records")
 
 
 def normalise(job: dict) -> dict:
-    jid = str(job.get("id", ""))
+    # Use job_url as unique ID since aggregators don't expose internal IDs
+    url  = str(job.get("job_url", ""))
+    jid  = url.split("/")[-1].split("?")[0] or url[-40:]
     return {
         "jobId":       jid,
-        "title":       job.get("name", "").strip(),
-        "location":    job.get("location", "").strip(),
-        "postingDate": (job.get("t_update", "") or "")[:10],
-        "url":         f"https://jobs.careers.microsoft.com/global/en/job/{jid}/",
+        "title":       str(job.get("title", "")).strip(),
+        "location":    str(job.get("location", "")).strip(),
+        "postingDate": str(job.get("date_posted", ""))[:10],
+        "url":         url,
         "scraped_at":  datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     }
 
@@ -115,19 +84,17 @@ def main() -> None:
     print("  Microsoft Careers Scraper — SDE, All Locations")
     print("=" * 55)
 
-    raw: list = []
-    for kw in KEYWORDS:
-        raw.extend(scrape_keyword(kw))
+    raw = fetch_jobs()
+    normalised = [normalise(j) for j in raw]
 
-    # Deduplicate within this run
+    # Deduplicate
     seen_this_run: dict = {}
-    for job in raw:
-        jid = str(job.get("id", ""))
-        if jid and jid not in seen_this_run:
-            seen_this_run[jid] = normalise(job)
+    for j in normalised:
+        if j["jobId"] and j["jobId"] not in seen_this_run:
+            seen_this_run[j["jobId"]] = j
 
     all_this_run = list(seen_this_run.values())
-    print(f"\n✅  Unique jobs found: {len(all_this_run)}")
+    print(f"\n✅  Unique jobs: {len(all_this_run)}")
 
     seen_before = load_seen_ids()
     new_jobs = [j for j in all_this_run if j["jobId"] not in seen_before]
