@@ -1,6 +1,6 @@
 """
 Microsoft Careers Scraper — SDE roles, all locations
-Uses Playwright (headless browser) to bypass 403 bot detection
+Uses Playwright APIRequestContext to call the search API directly.
 Outputs: microsoft_jobs.csv (all), new_jobs.csv (only new since last run)
 """
 
@@ -10,7 +10,7 @@ import os
 import time
 from datetime import datetime, timezone
 
-from playwright.sync_api import Route, sync_playwright
+from playwright.sync_api import sync_playwright
 
 # ── CONFIG ───────────────────────────────────────────────────
 KEYWORDS      = ["software engineer", "SDE", "software development engineer"]
@@ -22,82 +22,66 @@ SEEN_IDS_FILE = os.path.join(OUTPUT_DIR, "seen_ids.json")
 ALL_JOBS_CSV  = os.path.join(OUTPUT_DIR, "microsoft_jobs.csv")
 NEW_JOBS_CSV  = os.path.join(OUTPUT_DIR, "new_jobs.csv")
 
-BASE_URL   = "https://jobs.careers.microsoft.com/global/en/search"
-WARMUP_URL = "https://careers.microsoft.com/us/en/search-results"
+BASE_URL = "https://jobs.careers.microsoft.com/global/en/search"
 
 
-def fetch_jobs_page(page, keyword: str, location: str, pg: int) -> dict:
-    params = "&".join([
-        f"q={keyword.replace(' ', '+')}",
-        f"lc={location}",
-        "l=en_us",
-        f"pg={pg}",
-        f"pgSz={PAGE_SIZE}",
-        "o=Relevance",
-        "flt=true",
-    ])
-    url = f"{BASE_URL}?{params}"
-    captured: dict = {}
+def fetch_jobs_page(request_ctx, keyword: str, location: str, pg: int) -> dict:
+    params = {
+        "q":    keyword,
+        "lc":   location,
+        "l":    "en_us",
+        "pg":   str(pg),
+        "pgSz": str(PAGE_SIZE),
+        "o":    "Relevance",
+        "flt":  "true",
+    }
+    query = "&".join(f"{k}={v}" for k, v in params.items())
+    url = f"{BASE_URL}?{query}"
+    print(f"  GET {url[:100]}")
 
-    def handle_route(route: Route) -> None:
-        response = route.fetch()
-        print(f"  [route] {response.status} {response.url[:80]}")
-        if response.status == 200:
-            content_type = response.headers.get("content-type", "")
-            print(f"  [route] content-type: {content_type}")
-            if "json" in content_type or "text/plain" in content_type:
-                try:
-                    captured["data"] = response.json()
-                    print(f"  [route] captured JSON, keys: {list(captured['data'].keys())[:5]}")
-                except ValueError as e:
-                    print(f"  [route] JSON parse failed: {e}")
-        route.fulfill(response=response)
+    response = request_ctx.get(
+        url,
+        headers={
+            "Accept":          "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer":         "https://careers.microsoft.com/",
+            "Origin":          "https://careers.microsoft.com",
+            "sec-fetch-dest":  "empty",
+            "sec-fetch-mode":  "cors",
+            "sec-fetch-site":  "same-site",
+        },
+    )
+    print(f"  Status: {response.status}")
+    print(f"  Content-Type: {response.headers.get('content-type', 'unknown')}")
 
-    page.route("**/jobs.careers.microsoft.com/**", handle_route)
-    print(f"  Navigating to: {url[:100]}")
-    page.goto(url, wait_until="networkidle", timeout=60000)
-    page.wait_for_timeout(3000)
-    page.unroute("**/jobs.careers.microsoft.com/**", handle_route)
-
-    if not captured:
-        print(f"  ⚠️  Nothing captured — dumping all network requests:")
-        # Try direct API fetch via page.evaluate as fallback
-        print("  Trying direct fetch fallback...")
+    if response.status == 200:
         try:
-            result = page.evaluate(f"""
-                async () => {{
-                    const r = await fetch('{url}', {{
-                        headers: {{
-                            'Accept': 'application/json',
-                        }}
-                    }});
-                    return {{ status: r.status, body: await r.text() }};
-                }}
-            """)
-            print(f"  Direct fetch status: {result['status']}")
-            if result['status'] == 200:
-                captured["data"] = json.loads(result['body'])
-                print(f"  Direct fetch captured {len(captured['data'])} keys")
-        except Exception as e:
-            print(f"  Direct fetch failed: {e}")
+            data = response.json()
+            jobs = data.get("operationResult", {}).get("result", {}).get("jobs", [])
+            print(f"  Jobs in response: {len(jobs)}")
+            return data
+        except ValueError as e:
+            print(f"  JSON parse error: {e}")
+            print(f"  Body (first 300): {response.text()[:300]}")
+    else:
+        print(f"  Body (first 300): {response.text()[:300]}")
 
-    return captured.get("data", {})
+    return {}
 
 
-def scrape_keyword(page, keyword: str, location: str) -> list:
+def scrape_keyword(request_ctx, keyword: str, location: str) -> list:
     all_jobs = []
     pg = 1
     print(f"\n🔍  Searching: '{keyword}' | location: '{location or 'All'}'")
 
     while True:
-        data   = fetch_jobs_page(page, keyword, location, pg)
+        data   = fetch_jobs_page(request_ctx, keyword, location, pg)
         result = data.get("operationResult", {}).get("result", {})
         jobs   = result.get("jobs", [])
         total  = result.get("totalJobs", 0)
 
         if not jobs:
             print(f"  No jobs on page {pg} (total reported: {total})")
-            print(f"  Data keys: {list(data.keys())[:10]}")
             break
 
         all_jobs.extend(jobs)
@@ -151,35 +135,24 @@ def main() -> None:
     print("=" * 55)
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled",
-            ],
-        )
-        context = browser.new_context(
+        # Use APIRequestContext — direct HTTP calls, no browser rendering
+        request_ctx = p.request.new_context(
+            base_url="https://jobs.careers.microsoft.com",
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/125.0.0.0 Safari/537.36"
             ),
-            viewport={"width": 1280, "height": 800},
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+            },
         )
-        page = context.new_page()
-
-        print("\n🌐  Loading Microsoft Careers to establish session...")
-        page.goto(WARMUP_URL, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(3000)
-        print(f"✅  Page title: {page.title()}")
-        print(f"✅  URL after load: {page.url}")
 
         raw: list = []
         for kw in KEYWORDS:
-            raw.extend(scrape_keyword(page, kw, LOCATION))
+            raw.extend(scrape_keyword(request_ctx, kw, LOCATION))
 
-        browser.close()
+        request_ctx.dispose()
 
     seen_this_run: dict = {}
     for job in raw:
