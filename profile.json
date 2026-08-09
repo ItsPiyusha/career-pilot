@@ -1,0 +1,18 @@
+{
+    "first_name":          "Piyusha",
+    "last_name":           "Lomate",
+    "email":               "piyushavpawar@gmail.com",
+    "phone":               "+917249575797",
+    "linkedin":            "https://linkedin.com/in/piyusha-lomate",
+    "github":              "https://github.com/ItsPiyusha",
+    "portfolio":           "https://github.com/ItsPiyusha",
+    "location":            "Hyderabad, India",
+    "resume_path":         "resume.pdf",
+    "years_experience":    "9",
+    "notice_period":       "30 days",
+    "work_authorization":  "No",
+    "require_sponsorship": "YES",
+    "gender":              "Female",
+    "veteran_status":      "I am not a veteran",
+    "disability_status":   "I do not have a disability"
+}
