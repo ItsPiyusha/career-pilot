@@ -1,5 +1,5 @@
 
-Scrape · YML
+# Microsoft SDE Job Scraper — career-pilot
 name: Microsoft Jobs Scraper
  
 on:
@@ -27,6 +27,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
  
+      - name: Install Playwright browser
+        run: |
+          pip install playwright
+          playwright install chromium
+          playwright install-deps chromium
+ 
       - name: Run scraper
         run: python scraper.py
         env:
@@ -38,15 +44,20 @@ jobs:
           if [ -f new_jobs.csv ]; then
             COUNT=$(tail -n +2 new_jobs.csv | wc -l | tr -d ' ')
             echo "new_count=$COUNT" >> $GITHUB_OUTPUT
+            echo "has_results=true" >> $GITHUB_OUTPUT
           else
             echo "new_count=0" >> $GITHUB_OUTPUT
+            echo "has_results=false" >> $GITHUB_OUTPUT
           fi
  
       - name: Commit results
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add microsoft_jobs.csv new_jobs.csv seen_ids.json
+          # Only add files that actually exist
+          for f in microsoft_jobs.csv new_jobs.csv seen_ids.json; do
+            [ -f "$f" ] && git add "$f"
+          done
           git diff --staged --quiet || git commit -m \
             "🤖 Scrape $(date +'%Y-%m-%d'): ${{ steps.check.outputs.new_count }} new SDE jobs"
           git push
@@ -58,7 +69,11 @@ jobs:
           echo "## 📊 Scrape Results" >> $GITHUB_STEP_SUMMARY
           echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          TOTAL=$(tail -n +2 microsoft_jobs.csv | wc -l | tr -d ' ')
+          if [ -f microsoft_jobs.csv ]; then
+            TOTAL=$(tail -n +2 microsoft_jobs.csv | wc -l | tr -d ' ')
+          else
+            TOTAL=0
+          fi
           echo "| Total jobs found | $TOTAL |" >> $GITHUB_STEP_SUMMARY
           echo "| New since last run | ${{ steps.check.outputs.new_count }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Run time | $(date +'%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
