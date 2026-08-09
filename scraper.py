@@ -27,7 +27,6 @@ WARMUP_URL = "https://careers.microsoft.com/us/en/search-results"
 
 
 def fetch_jobs_page(page, keyword: str, location: str, pg: int) -> dict:
-    """Navigate to the search URL and intercept the API JSON via route."""
     params = "&".join([
         f"q={keyword.replace(' ', '+')}",
         f"lc={location}",
@@ -38,26 +37,49 @@ def fetch_jobs_page(page, keyword: str, location: str, pg: int) -> dict:
         "flt=true",
     ])
     url = f"{BASE_URL}?{params}"
-
     captured: dict = {}
 
     def handle_route(route: Route) -> None:
         response = route.fetch()
-        # Only parse successful JSON responses, skip redirects
+        print(f"  [route] {response.status} {response.url[:80]}")
         if response.status == 200:
             content_type = response.headers.get("content-type", "")
-            if "application/json" in content_type or "text/plain" in content_type:
+            print(f"  [route] content-type: {content_type}")
+            if "json" in content_type or "text/plain" in content_type:
                 try:
                     captured["data"] = response.json()
-                except ValueError:
-                    pass
+                    print(f"  [route] captured JSON, keys: {list(captured['data'].keys())[:5]}")
+                except ValueError as e:
+                    print(f"  [route] JSON parse failed: {e}")
         route.fulfill(response=response)
 
-    # Intercept only the search API calls
-    page.route("**/jobs.careers.microsoft.com/**/search**", handle_route)
-    page.goto(url, wait_until="networkidle", timeout=30000)
-    page.wait_for_timeout(1500)
-    page.unroute("**/jobs.careers.microsoft.com/**/search**", handle_route)
+    page.route("**/jobs.careers.microsoft.com/**", handle_route)
+    print(f"  Navigating to: {url[:100]}")
+    page.goto(url, wait_until="networkidle", timeout=60000)
+    page.wait_for_timeout(3000)
+    page.unroute("**/jobs.careers.microsoft.com/**", handle_route)
+
+    if not captured:
+        print(f"  ⚠️  Nothing captured — dumping all network requests:")
+        # Try direct API fetch via page.evaluate as fallback
+        print("  Trying direct fetch fallback...")
+        try:
+            result = page.evaluate(f"""
+                async () => {{
+                    const r = await fetch('{url}', {{
+                        headers: {{
+                            'Accept': 'application/json',
+                        }}
+                    }});
+                    return {{ status: r.status, body: await r.text() }};
+                }}
+            """)
+            print(f"  Direct fetch status: {result['status']}")
+            if result['status'] == 200:
+                captured["data"] = json.loads(result['body'])
+                print(f"  Direct fetch captured {len(captured['data'])} keys")
+        except Exception as e:
+            print(f"  Direct fetch failed: {e}")
 
     return captured.get("data", {})
 
@@ -74,7 +96,8 @@ def scrape_keyword(page, keyword: str, location: str) -> list:
         total  = result.get("totalJobs", 0)
 
         if not jobs:
-            print(f"  No jobs on page {pg} — stopping")
+            print(f"  No jobs on page {pg} (total reported: {total})")
+            print(f"  Data keys: {list(data.keys())[:10]}")
             break
 
         all_jobs.extend(jobs)
@@ -130,7 +153,11 @@ def main() -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled",
+            ],
         )
         context = browser.new_context(
             user_agent=(
@@ -143,9 +170,10 @@ def main() -> None:
         page = context.new_page()
 
         print("\n🌐  Loading Microsoft Careers to establish session...")
-        page.goto(WARMUP_URL, wait_until="networkidle", timeout=30000)
-        page.wait_for_timeout(2000)
-        print("✅  Session established")
+        page.goto(WARMUP_URL, wait_until="networkidle", timeout=60000)
+        page.wait_for_timeout(3000)
+        print(f"✅  Page title: {page.title()}")
+        print(f"✅  URL after load: {page.url}")
 
         raw: list = []
         for kw in KEYWORDS:
@@ -153,7 +181,6 @@ def main() -> None:
 
         browser.close()
 
-    # Deduplicate within this run
     seen_this_run: dict = {}
     for job in raw:
         jid = str(job.get("jobId", ""))
