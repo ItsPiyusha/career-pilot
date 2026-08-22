@@ -21,6 +21,8 @@ import requests
 
 # ── CONFIG ───────────────────────────────────────────────────
 KEYWORDS  = ["engineer", "software", "developer", "SDE", "backend", "frontend", "fullstack", "full stack", "ML", "data"]
+INDIA_KEYWORDS = ["india", "bangalore", "bengaluru", "hyderabad", "pune", "mumbai", "chennai", "delhi", "gurgaon", "noida", "remote"]
+FILTER_INDIA_ONLY = False   # Set True to show only India + Remote jobs
 DELAY     = 0.5
 OUTPUT_DIR    = os.path.dirname(os.path.abspath(__file__))
 SEEN_IDS_FILE = os.path.join(OUTPUT_DIR, "seen_ids_all.json")
@@ -91,6 +93,16 @@ HEADERS = {
 }
 
 
+def is_india_or_remote(location: str) -> bool:
+    """Returns True if job is in India, Remote, or location is unspecified."""
+    if not FILTER_INDIA_ONLY:
+        return True
+    if not location:
+        return True  # include unspecified locations
+    loc_lower = location.lower()
+    return any(kw in loc_lower for kw in INDIA_KEYWORDS)
+
+
 def is_engineering_role(title: str) -> bool:
     title_lower = title.lower()
     return any(kw in title_lower for kw in KEYWORDS)
@@ -107,7 +119,17 @@ def fetch_greenhouse(company: str, slug: str) -> list:
             return []
         resp.raise_for_status()
         jobs = resp.json().get("jobs", [])
-        filtered = [j for j in jobs if is_engineering_role(j.get("title", ""))]
+        filtered = []
+        for j in jobs:
+            if not is_engineering_role(j.get("title", "")):
+                continue
+            loc = ""
+            if j.get("offices"):
+                loc = j["offices"][0].get("name", "")
+            elif j.get("location"):
+                loc = j["location"].get("name", "")
+            if is_india_or_remote(loc):
+                filtered.append(j)
         print(f"  ✓  {company}: {len(filtered)} eng roles (of {len(jobs)} total)")
         return [normalise_greenhouse(j, company) for j in filtered]
     except Exception as e:
@@ -145,7 +167,15 @@ def fetch_lever(company: str, slug: str) -> list:
             return []
         resp.raise_for_status()
         jobs = resp.json()
-        filtered = [j for j in jobs if is_engineering_role(j.get("text", ""))]
+        filtered = []
+        for j in jobs:
+            if not is_engineering_role(j.get("text", "")):
+                continue
+            cats = j.get("categories", {})
+            loc = cats.get("location", "")
+            all_locs = " ".join(cats.get("allLocations", []))
+            if is_india_or_remote(loc + " " + all_locs):
+                filtered.append(j)
         print(f"  ✓  {company}: {len(filtered)} eng roles (of {len(jobs)} total)")
         return [normalise_lever(j, company) for j in filtered]
     except Exception as e:
